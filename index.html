@@ -1,141 +1,67 @@
-from flask import Flask, render_template, jsonify, request
-import sqlite3
-import os
-import math
+<script>
+let imageFiles = [];
+let ratings = {};
+const K = 32;
 
-app = Flask(__name__)
-DATABASE = "database.db"
-K = 32  # ELO constant
+async function loadImages() {
+    const res = await fetch("images.json");
+    imageFiles = await res.json();
 
-# -------------------------
-# Database Helper
-# -------------------------
-def get_db():
-    conn = sqlite3.connect(DATABASE)
-    conn.row_factory = sqlite3.Row
-    return conn
+    ratings = JSON.parse(localStorage.getItem("eloRatings")) || {};
 
-# -------------------------
-# Create Table If Not Exists
-# -------------------------
-with get_db() as conn:
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS images (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            filename TEXT UNIQUE,
-            label TEXT,
-            rating REAL DEFAULT 1200
-        )
-    """)
+    imageFiles.forEach(file => {
+        if (!ratings[file]) ratings[file] = 1200;
+    });
 
-# -------------------------
-# Auto-Load Images From Folder
-# -------------------------
-@app.before_first_request
-def load_images():
-    with get_db() as conn:
-        for file in os.listdir("static/images"):
-            name, ext = os.path.splitext(file)
+    saveRatings();
+    loadBattle();
+}
 
-            if ext.lower() not in [".jpg", ".jpeg", ".png", ".webp"]:
-                continue
+function saveRatings() {
+    localStorage.setItem("eloRatings", JSON.stringify(ratings));
+}
 
-            # Optional: clean up label formatting
-            label = name.replace("_", " ").title()
+function getRandomMatchup() {
+    const shuffled = [...imageFiles].sort(() => 0.5 - Math.random());
+    return [shuffled[0], shuffled[1]];
+}
 
-            conn.execute("""
-                INSERT OR IGNORE INTO images (filename, label)
-                VALUES (?, ?)
-            """, (file, label))
+function updateElo(winner, loser) {
+    const rw = ratings[winner];
+    const rl = ratings[loser];
 
-# -------------------------
-# Routes
-# -------------------------
-@app.route("/")
-def index():
-    return render_template("index.html")
+    const expected = 1 / (1 + Math.pow(10, (rl - rw) / 400));
 
-@app.route("/leaderboard")
-def leaderboard():
-    return render_template("leaderboard.html")
+    ratings[winner] = rw + K * (1 - expected);
+    ratings[loser] = rl + K * (0 - (1 - expected));
 
-@app.route("/matchup")
-def matchup():
-    with get_db() as conn:
-        images = conn.execute(
-            "SELECT * FROM images ORDER BY RANDOM() LIMIT 2"
-        ).fetchall()
+    saveRatings();
+}
 
-    if len(images) < 2:
-        return jsonify([])
+function loadBattle() {
+    if (imageFiles.length < 2) {
+        document.getElementById("battle").innerHTML = "Not enough images.";
+        return;
+    }
 
-    result = []
-    for img in images:
-        result.append({
-            "id": img["id"],
-            "url": f"/static/images/{img['filename']}",
-            "label": img["label"]
-        })
+    const [img1, img2] = getRandomMatchup();
 
-    return jsonify(result)
+    document.getElementById("battle").innerHTML = `
+        <div>
+            <img src="static/uploads/${img1}" width="300" onclick="vote('${img1}','${img2}')">
+            <div>${img1.replace(/\.[^/.]+$/, "")}</div>
+        </div>
+        <div>
+            <img src="static/uploads/${img2}" width="300" onclick="vote('${img2}','${img1}')">
+            <div>${img2.replace(/\.[^/.]+$/, "")}</div>
+        </div>
+    `;
+}
 
-@app.route("/vote", methods=["POST"])
-def vote():
-    data = request.json
-    winner_id = data["winnerId"]
-    loser_id = data["loserId"]
+function vote(winner, loser) {
+    updateElo(winner, loser);
+    loadBattle();
+}
 
-    with get_db() as conn:
-        winner = conn.execute(
-            "SELECT rating FROM images WHERE id=?",
-            (winner_id,)
-        ).fetchone()
-
-        loser = conn.execute(
-            "SELECT rating FROM images WHERE id=?",
-            (loser_id,)
-        ).fetchone()
-
-        if not winner or not loser:
-            return jsonify({"error": "Invalid IDs"}), 400
-
-        # ELO Calculation
-        expected_winner = 1 / (1 + 10 ** ((loser["rating"] - winner["rating"]) / 400))
-        expected_loser = 1 - expected_winner
-
-        new_winner = winner["rating"] + K * (1 - expected_winner)
-        new_loser = loser["rating"] + K * (0 - expected_loser)
-
-        conn.execute(
-            "UPDATE images SET rating=? WHERE id=?",
-            (new_winner, winner_id)
-        )
-
-        conn.execute(
-            "UPDATE images SET rating=? WHERE id=?",
-            (new_loser, loser_id)
-        )
-
-    return jsonify({"status": "ok"})
-
-@app.route("/leaderboard-data")
-def leaderboard_data():
-    with get_db() as conn:
-        images = conn.execute(
-            "SELECT * FROM images ORDER BY rating DESC"
-        ).fetchall()
-
-    return jsonify([
-        {
-            "label": img["label"],
-            "url": f"/static/images/{img['filename']}",
-            "rating": round(img["rating"])
-        }
-        for img in images
-    ])
-
-# -------------------------
-# Run App
-# -------------------------
-if __name__ == "__main__":
-    app.run(debug=True)
+loadImages();
+</script>
