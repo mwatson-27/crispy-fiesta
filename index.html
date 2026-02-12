@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Image Battle</title>
+</head>
+<body>
+    <h1>1v1 Image Battle</h1>
+
+    <div id="battle"></div>
+
+    <h2>Submit Image</h2>
+    <input id="url" placeholder="Image URL">
+    <input id="label" placeholder="Label">
+    <button onclick="submitImage()">Submit</button>
+
+    <br><br>
+    <a href="/leaderboard">View Leaderboard</a>
+
+<script>
+async function loadMatchup() {
+    const res = await fetch("/matchup");
+    const images = await res.json();
+
+    if (images.length < 2) {
+        document.getElementById("battle").innerHTML = "Not enough images.";
+        return;
+    }
+
+    document.getElementById("battle").innerHTML = `
+        <div>
+            <img src="${images[0].url}" width="300"><br>
+            <b>${images[0].label}</b><br>
+            <button onclick="vote(${images[0].id}, ${images[1].id})">Vote</button>
+        </div>
+        <hr>
+        <div>
+            <img src="${images[1].url}" width="300"><br>
+            <b>${images[1].label}</b><br>
+            <button onclick="vote(${images[1].id}, ${images[0].id})">Vote</button>
+        </div>
+    `;
+}
+
+async function vote(winnerId, loserId) {
+    await fetch("/vote", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({winnerId, loserId})
+    });
+
+    loadMatchup();
+}
+
+async function submitImage() {
+    const url = document.getElementById("url").value;
+    const label = document.getElementById("label").value;
+
+    await fetch("/submit", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({url, label})
+    });
+
+    alert("Submitted!");
+}
+
+loadMatchup();
+</script>
+</body>
+</html>
